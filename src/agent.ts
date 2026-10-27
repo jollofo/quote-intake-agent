@@ -10,7 +10,7 @@ export const MODEL = 'claude-opus-5-5';
 // USD per million tokens for MODEL (input, output). Used for eval cost reporting.
 export const PRICE_PER_MTOK = { input: 4, output: 20 };
 
-const SYSTEM = `You read inbound quote requests for ${BUSINESS.name}, a heating/cooling, plumbing and electrical contractor in the Rochester, NY area, and draft a reply for a dispatcher to approve.
+export const SYSTEM = `You read inbound quote requests for ${BUSINESS.name}, a heating/cooling, plumbing and electrical contractor in the Rochester, NY area, and draft a reply for a dispatcher to approve.
 
 Services we offer (use these codes; anything else is "other"):
 ${SERVICE_CODES.map(c => `- ${c}: ${PRICE_BOOK[c].label}`).join('\n')}
@@ -68,7 +68,7 @@ export async function triage(inquiry: string, client = new Anthropic()): Promise
 }
 
 // The "before" picture for the write-up: one prompt, same facts, no schema or policy layer.
-const NAIVE_SYSTEM = `You are the front desk for ${BUSINESS.name}, a heating/cooling, plumbing and electrical contractor in the Rochester, NY area (phone ${BUSINESS.phone}, hours ${BUSINESS.hours}). Reply to the customer's quote request helpfully and professionally.
+export const NAIVE_SYSTEM = `You are the front desk for ${BUSINESS.name}, a heating/cooling, plumbing and electrical contractor in the Rochester, NY area (phone ${BUSINESS.phone}, hours ${BUSINESS.hours}). Reply to the customer's quote request helpfully and professionally.
 
 Price book:
 ${SERVICE_CODES.map(c => `- ${PRICE_BOOK[c].label}: $${PRICE_BOOK[c].low}-$${PRICE_BOOK[c].high} (${PRICE_BOOK[c].unit})`).join('\n')}`;

@@ -11,7 +11,9 @@ const SAFETY_PATTERNS: [RegExp, string][] = [
   [/\b(carbon monoxide|co (alarm|detector)|co2? detector (is )?(going off|beeping))\b/i, 'carbon monoxide'],
   [/\b(spark(s|ing)?|arcing|smok(e|ing) from|burning (smell|plastic)|melted (outlet|wire|plug))\b/i, 'electrical fire risk'],
   [/\b(water|flood(ing|ed)?) (near|around|on|into) (the )?(panel|breaker|outlet|electrical)\b/i, 'water near electrical'],
-  [/\b(olor a gas|huele a gas|fuga de gas|chispas)\b/i, 'gas odor or sparks (es)'],
+  [/\b(panel|breaker( box)?|outlet|switch|wires?|plug)\b[^.]{0,40}\b(hot|warm) to the touch|\b(panel|breaker( box)?)\b[^.]{0,40}\b(buzz(es|ing)?|humm?ing|crackl(es|ing))\b/i, 'overheating electrical'],
+  [/\b(water|puddle|leak(ing)?|drip(ping)?)\b[^.]{0,60}\b(under|near|next to|around|on|into|behind)\b[^.]{0,20}\b(electrical )?(panel|breaker( box)?|outlets?)\b/i, 'water near electrical'],
+  [/\b(olor a gas|huele a gas|fuga de gas|chispas|huele a quemado|quemad[oa]s?|humo)\b/i, 'gas, sparks or burning (es)'],
 ];
 
 const URGENT_PATTERNS = /\b(burst|bursting|flooding|water (is )?(pouring|everywhere|gushing)|sewage (backing|backup|coming up)|no heat\b.*\b(baby|infant|elderly|freezing|below zero|\d+ ?degrees)|no (hot )?water at all)\b/i;
@@ -19,7 +21,17 @@ const URGENT_PATTERNS = /\b(burst|bursting|flooding|water (is )?(pouring|everywh
 // Money and commitments are the two things a reply must never invent.
 const MONEY = /(\$\s?\d|\d[\d,.]*\s?(dollars|usd|bucks)\b|\b\d+\s?%\s?(off|discount))/i;
 const COMMITMENT = /\b(guarantee[ds]?|promise[ds]?|we('ll| will) be there (today|tonight|tomorrow|in \d+)|(today|tomorrow) at \d{1,2}(:\d\d)?\s?(am|pm)?|free of charge|no charge|waive)\b/i;
-const MANIPULATION = /\b(ignore (all |any |your )?(previous |prior )?instructions|system prompt|you are now|act as|developer mode|pretend (to be|you)|give me (a |an )?(\d+ ?% )?(discount|free))\b/i;
+const MANIPULATION = /\b(ignore (all |any |your )?(previous |prior )?instructions|system prompt|you are now|act as|developer mode|pretend (to be|you)|give me (a |an )?(\d+ ?% )?(discount|free)|\d+ ?% (off|discount)|(discount|price|that) in writing|ignore (your |the |all |any )?(\w+ )?(rules|instructions)|(print|reveal|show|output) (me )?(your |the )?(full |internal )?(instructions|prompt)|(do it|for) free\b|knock (a little|something|some) off)\b/i;
+
+// Details the price book needs must have some evidence in the customer's text before
+// the model's claim that they were "provided" is believed. Unverified claims are
+// dropped, which only ever makes the agent ask again, never skip a question.
+const EVIDENCE: Partial<Record<InfoKey, RegExp>> = {
+  equipment_age: /\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty)[- ]?(years?|yrs?)\b|\b(brand new|new last year)\b|\baños\b/i,
+  photos: /\b(photos?|pictures?|pics?|images?|attached|fotos?)\b/i,
+  access_details: /\b(under|behind|inside|ceiling|wall|floor|cabinet|basement|attic|crawl ?space|trap|pipe under)\b/i,
+  fixture_count: /\b(\d+|one|two|three|four|five|six|single|a|an|un|una|dos|tres|cuatro)\s+(new\s+|nuev[oa]s?\s+)?(\w+\s+)?(faucets?|fixtures?|outlets?|switch(es)?|fans?|lights?|toilets?|sinks?|devices?|l[aá]mparas?|inodoros?|enchufes?|grifos?|lavamanos|ventiladores?)\b/i,
+};
 
 const digits = (s: string) => s.replace(/\D/g, '');
 
@@ -66,7 +78,7 @@ function templateReply(route: Decision['route'], codes: ServiceCode[], missing: 
 
 export function decide(inquiry: string, t: Triage): Decision {
   const flags: string[] = [];
-  const known = t.services.map(s => s.code);
+  const known = [...new Set(t.services.map(s => s.code))];
   const codes = known.filter((c): c is ServiceCode => c !== 'other');
   const base = { services: known, staff_note: t.staff_note };
 
@@ -108,10 +120,15 @@ export function decide(inquiry: string, t: Triage): Decision {
   if (codes.length < known.length) flags.push('partial_scope');
 
   // Missing information comes from the price book, not from the model's opinion.
+  const needed = [...new Set(codes.flatMap(c => PRICE_BOOK[c].needs))];
   const provided = new Set<InfoKey>(t.provided);
+  for (const key of needed) {
+    const re = EVIDENCE[key];
+    if (re && provided.has(key) && !re.test(inquiry)) { provided.delete(key); flags.push(`ungrounded_${key}`); }
+  }
   if (zip) provided.add('address_or_zip'); else provided.delete('address_or_zip');
   if (contact.phone || contact.email) provided.add('phone_or_email'); else provided.delete('phone_or_email');
-  const missing = [...new Set(codes.flatMap(c => PRICE_BOOK[c].needs))].filter(k => !provided.has(k));
+  const missing = needed.filter(k => !provided.has(k));
   const route = missing.length ? 'ask_for_info' : 'send_estimate';
 
   // The model's draft is used only if it passes every check; otherwise a template.

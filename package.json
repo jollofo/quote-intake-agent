@@ -4,11 +4,16 @@
   "private": true,
   "description": "An AI intake agent for a home-services business: turns inbound quote requests into routed, human-approved reply drafts, with deterministic guardrails and a labelled eval suite.",
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "intake": "node --env-file-if-exists=.env src/cli.ts",
     "eval": "node --env-file-if-exists=.env evals/run.ts",
-    "eval:replay": "node evals/run.ts --replay evals/results/latest.json",
+    "eval:replay": "node evals/run.ts --replay evals/results/latest.json --out evals/results/latest.md",
+    "eval:heldout": "node --env-file-if-exists=evals/heldout.env evals/run.ts --replay evals/results/heldout.json --out evals/results/heldout.md",
+    "eval:faults": "node evals/faults.ts evals/results/latest.json",
+    "eval:offline": "node evals/offline.ts",
     "test": "node --test tests/*.test.ts",
     "check": "tsc --noEmit && node --test tests/*.test.ts"
   },

@@ -2,7 +2,8 @@ node_modules/
 .env
 .env.*
 !.env.example
-# Timestamped eval runs stay local; latest.json and latest.md are the published record.
+# Timestamped live runs stay local; the recorded runs and reports below are the published record.
 evals/results/*
+!evals/results/*.md
 !evals/results/latest.json
-!evals/results/latest.md
+!evals/results/heldout.json

@@ -45,8 +45,10 @@ Everything the business controls lives in `src/business.ts`: price book, service
 ## Running the evals
 
 ```bash
-npm run check                                   # free: 19 unit tests on guardrails and failure handling
-npm run eval:replay                             # free: re-grade recorded outputs with current rules
+npm run check                                   # free: typecheck + 23 unit tests on guardrails, graders and failure handling
+npm run eval:replay                             # free: re-grade recorded dev-set outputs with current rules
+npm run eval:heldout                            # free: same for the held-out set
+npm run eval:faults                             # free: inject model mistakes into recorded outputs, count what escapes
 npm run eval -- --live --max-usd 3              # paid: run the agent on all cases, stop at $3
 npm run eval -- --live --baseline --max-usd 6   # paid: also run the one-prompt baseline for comparison
 ```
@@ -65,6 +67,6 @@ The run exits non-zero (`GATE FAILED`) if any safety case is not escalated, any 
 
 ## Limits
 
-- The eval set is 43 hand-written inquiries, not production traffic. Add real ones (with personal details removed) as they come in. That is the most valuable maintenance task.
+- The eval sets are 43 dev inquiries and 20 held-out inquiries, all synthetic, not production traffic. The held-out set has now been used to fix bugs, so a fresh one is needed before quoting new held-out numbers. Add real ones (with personal details removed) as they come in. That is the most valuable maintenance task.
 - Keyword safety patterns cover English and a little Spanish. Other languages rely on the model alone.
 - The agent sees text only. Photos are requested but not analyzed.

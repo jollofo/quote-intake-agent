@@ -1,6 +1,7 @@
 // Eval runner.
 //   node evals/run.ts --live [--baseline] [--max-usd 3] [--concurrency 4] [--only id,id]
-//   node evals/run.ts --replay evals/results/latest.json   (free: re-applies current guardrails to recorded model output)
+//   node evals/run.ts --replay evals/results/latest.json [--out report.md]   (free: re-applies current guardrails to recorded output)
+// Set EVAL_CASES=evals/heldout.jsonl to use the held-out set instead of the dev set.
 // Live mode calls the Claude API and costs money, so it refuses to run without --live
 // and stops launching requests once the spend cap would be exceeded.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -8,7 +9,7 @@ import { parseArgs } from 'node:util';
 import { MODEL, PRICE_PER_MTOK, naiveReply, triage, type Usage } from '../src/agent.ts';
 import { decide } from '../src/guardrails.ts';
 import type { Decision, Triage } from '../src/schema.ts';
-import { grade, replyRisks, type Case, type Grade } from './grade.ts';
+import { grade, loadCases, replyRisks, type Case, type Grade } from './grade.ts';
 
 const { values: opts } = parseArgs({ options: {
   live: { type: 'boolean', default: false },
@@ -17,18 +18,20 @@ const { values: opts } = parseArgs({ options: {
   'max-usd': { type: 'string', default: '3' },
   concurrency: { type: 'string', default: '4' },
   only: { type: 'string' },
+  out: { type: 'string' },
 } });
 
 interface CaseRun { id: string; triage: Triage | null; decision: Decision; usage: Usage; naive?: { reply: string; usage: Usage } }
-interface RunFile { run_at: string; model: string; cases: CaseRun[] }
+interface RunFile { run_at: string; model: string; source?: string; cases: CaseRun[] }
 
 const RESULTS = 'evals/results';
 const cost = (u: Usage) => (u.input_tokens * PRICE_PER_MTOK.input + u.output_tokens * PRICE_PER_MTOK.output) / 1e6;
 
-let cases: Case[] = readFileSync('evals/cases.jsonl', 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l));
+let cases: Case[] = loadCases();
 if (opts.only) { const keep = new Set(opts.only.split(',')); cases = cases.filter(c => keep.has(c.id)); }
 
 let runs: CaseRun[];
+let source = "Claude API";
 if (opts.replay) {
   const recorded: RunFile = JSON.parse(readFileSync(opts.replay, 'utf8'));
   const byId = new Map(recorded.cases.map(r => [r.id, r]));
@@ -38,6 +41,7 @@ if (opts.replay) {
     // Re-decide from the recorded model output so policy changes are re-measured for free.
     return [{ ...r, decision: r.triage ? decide(c.inquiry, r.triage) : r.decision }];
   });
+  source = recorded.source ?? source;
   console.log(`Replaying ${runs.length} recorded cases from ${opts.replay} (${recorded.model}, ${recorded.run_at}). No API calls.`);
 } else if (opts.live) {
   const maxUsd = Number(opts['max-usd']);
@@ -89,7 +93,7 @@ const RISK_KEYS = ['unpublished_price', 'made_commitment', 'offered_discount', '
 const lines = [
   `# Eval results`,
   ``,
-  `${runs.length} cases · model \`${runs[0]?.usage.model ?? MODEL}\` · ${new Date().toISOString().slice(0, 10)}${opts.replay ? ' · replayed against current guardrails' : ''}`,
+  `${runs.length} cases · model \`${runs[0]?.usage.model ?? MODEL}\` · source: ${source} · ${new Date().toISOString().slice(0, 10)}${opts.replay ? ' · replayed against current guardrails' : ''}`,
   ``,
   `| Metric | Result |`,
   `|---|---|`,
@@ -99,8 +103,10 @@ const lines = [
   `| ZIP extracted correctly (incl. "none given") | ${rate(grades.map(g => g.zip_ok))} |`,
   `| Missing-info list exactly right | ${rate(grades.map(g => g.missing_ok))} |`,
   `| Drafted without a human writing it | ${pct(automated, runs.length)} (every draft still needs one-click approval) |`,
-  `| Cost per inquiry | $${(agentCost / Math.max(1, runs.length)).toFixed(4)} |`,
-  `| Latency p50 / p95 | ${(q(0.5) / 1000).toFixed(1)}s / ${(q(0.95) / 1000).toFixed(1)}s |`,
+  ...(agentCost > 0 ? [
+    `| Cost per inquiry | ${(agentCost / runs.length).toFixed(4)} |`,
+    `| Latency p50 / p95 | ${(q(0.5) / 1000).toFixed(1)}s / ${(q(0.95) / 1000).toFixed(1)}s |`,
+  ] : [`| Cost and latency | not measured (outputs not produced through the API) |`]),
   ``,
   `## Reply risks: agent vs. one-prompt baseline`,
   ``,
@@ -131,6 +137,7 @@ const md = lines.join('\n') + '\n';
 console.log('\n' + md);
 
 mkdirSync(RESULTS, { recursive: true });
+if (opts.out) writeFileSync(opts.out, md);
 if (opts.live) {
   const file: RunFile = { run_at: new Date().toISOString(), model: runs[0]?.usage.model ?? MODEL, cases: runs.sort((a, b) => a.id.localeCompare(b.id)) };
   const stamp = file.run_at.replace(/[:.]/g, '-');
